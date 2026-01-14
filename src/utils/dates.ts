@@ -49,9 +49,7 @@ export const createDateFormatter = ({
   }
 
   if (config.useTemporalFormatting && config.calendar !== "iso8601" && globalThis.Temporal) {
-    const temporal = globalThis.Temporal.Instant.fromEpochMilliseconds(dateObj.getTime())
-      .toZonedDateTimeISO(globalThis.Temporal.Now.timeZoneId())
-      .withCalendar(config.calendar);
+    const temporal = toTemporalInstant(dateObj, config.calendar);
 
     return frmt
     .split("")
@@ -263,13 +261,19 @@ export function toTemporalInstant(
   date: Date | number,
   calendarId: string = "iso8601"
 ) {
-  const timestamp = date instanceof Date ? date.getTime() : date;
-
   if (!globalThis.Temporal) {
      return null;
   }
 
-  return globalThis.Temporal.Instant.fromEpochMilliseconds(timestamp)
+  let instant;
+  if (date instanceof Date && typeof (date as any).toTemporalInstant === "function") {
+      instant = (date as any).toTemporalInstant();
+  } else {
+      const timestamp = date instanceof Date ? date.getTime() : date;
+      instant = globalThis.Temporal.Instant.fromEpochMilliseconds(timestamp);
+  }
+
+  return instant
     .toZonedDateTimeISO(globalThis.Temporal.Now.timeZoneId())
     .withCalendar(calendarId);
 }

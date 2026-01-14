@@ -33,6 +33,8 @@ import {
   calculateSecondsSinceMidnight,
   parseSeconds,
   initTemporalPolyfill,
+  toDate,
+  toTemporalInstant,
 } from "./utils/dates";
 
 import { tokenRegex, monthToStr } from "./utils/formatting";
@@ -94,6 +96,7 @@ function FlatpickrInstance(
 
         return self.l10n.daysInMonth[month];
       },
+      toDate: toDate, // Expose toDate to internal utilities
     };
   }
 
@@ -712,9 +715,7 @@ function FlatpickrInstance(
   ) {
     let dayText = date.getDate().toString();
     if (self.config.calendar !== "iso8601" && self.config.useTemporalFormatting && globalThis.Temporal) {
-        const temporalDate = globalThis.Temporal.Instant.fromEpochMilliseconds(date.getTime())
-          .toZonedDateTimeISO(globalThis.Temporal.Now.timeZoneId())
-          .withCalendar(self.config.calendar);
+        const temporalDate = toTemporalInstant(date, self.config.calendar);
         dayText = temporalDate.day.toString();
     }
 
@@ -931,7 +932,7 @@ function FlatpickrInstance(
              const targetDate = prevMonthDate.with({ day: dayNumber });
 
              // Convert to Gregorian Date for flatpickr internal storage
-             date = new Date(targetDate.withCalendar('iso8601').toZonedDateTime(globalThis.Temporal.Now.timeZoneId()).epochMilliseconds);
+             date = self.utils.toDate(targetDate);
           } catch(e) {
              // fallback or ignore
           }
@@ -958,7 +959,7 @@ function FlatpickrInstance(
                  calendar: self.config.calendar
           });
 
-          date = new Date(targetDate.withCalendar('iso8601').toZonedDateTime(globalThis.Temporal.Now.timeZoneId()).epochMilliseconds);
+          date = self.utils.toDate(targetDate);
       }
 
       days.appendChild(
@@ -990,7 +991,7 @@ function FlatpickrInstance(
           const nextMonthDate = currentMonthFirst.add({ months: 1 });
           const targetDate = nextMonthDate.with({ day: dayNum % daysInMonth });
 
-          date = new Date(targetDate.withCalendar('iso8601').toZonedDateTime(globalThis.Temporal.Now.timeZoneId()).epochMilliseconds);
+          date = self.utils.toDate(targetDate);
       }
 
       days.appendChild(
@@ -2722,9 +2723,7 @@ function FlatpickrInstance(
     if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
         // We can only do this if Temporal is loaded.
         // If not loaded, initTemporalPolyfill in init() will trigger this again.
-        const date = globalThis.Temporal.Instant.fromEpochMilliseconds(self._initialDate.getTime())
-          .toZonedDateTimeISO(globalThis.Temporal.Now.timeZoneId())
-          .withCalendar(self.config.calendar);
+        const date = toTemporalInstant(self._initialDate, self.config.calendar);
 
         self.currentYear = date.year;
         self.currentMonth = date.month - 1; // Temporal 1-based
