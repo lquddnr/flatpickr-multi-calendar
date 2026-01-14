@@ -1081,14 +1081,15 @@ function FlatpickrInstance(
         "flatpickr-monthDropdown-month"
       );
 
-      month.value = new Date(self.currentYear, i).getMonth().toString();
       if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+         month.value = i.toString();
          const date = globalThis.Temporal.Now.plainDateISO()
             .withCalendar(self.config.calendar)
             .with({ year: self.currentYear, month: i + 1, day: 1 });
          const monthName = date.toLocaleString(self.config.locale as string, { month: self.config.shorthandCurrentMonth ? "short" : "long", calendar: self.config.calendar });
          month.textContent = monthName;
       } else {
+        month.value = new Date(self.currentYear, i).getMonth().toString();
         month.textContent = monthToStr(
           i,
           self.config.shorthandCurrentMonth,

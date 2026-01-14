@@ -8,11 +8,13 @@ import {
 } from "./formatting";
 import { defaults, ParsedOptions } from "../types/options";
 import { english } from "../l10n/default";
-import { pad } from "../utils";
 
 declare global {
   var Temporal: any;
 }
+
+export const pad = (number: string | number, length = 2) =>
+  `000${number}`.slice(length * -1);
 
 export const initTemporalPolyfill = async () => {
   try {

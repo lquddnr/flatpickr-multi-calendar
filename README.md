@@ -38,6 +38,27 @@ Feature overview:
 
 flatpickr provides more functionality at a fraction of the size of other libraries.
 
+## Multi-Calendar Support
+
+flatpickr supports multiple calendars (e.g., Hebrew, Japanese, Ethiopic, Islamic) using the [Temporal API](https://tc39.es/proposal-temporal/). This functionality requires the `temporal-polyfill` package, which is loaded dynamically when needed.
+
+### Usage
+
+To use a non-Gregorian calendar, specify the `calendar` and `useTemporalFormatting` options:
+
+```javascript
+flatpickr("#my-input", {
+    calendar: "hebrew", // Supported values: "hebrew", "islamic", "japanese", "ethiopic", etc. (any Intl calendar ID)
+    useTemporalFormatting: true, // Uses Temporal API for date formatting
+    dateFormat: "Y-m-d", // Will output "5784-04-20" for Hebrew calendar
+});
+```
+
+*   `calendar`: The calendar to use. Defaults to `"iso8601"`.
+*   `useTemporalFormatting`: When `true`, enables localized date formatting using `Temporal`. This is useful for displaying dates in the target calendar's format (e.g., "5784" year). Defaults to `false`.
+
+**Note:** The `temporal-polyfill` is a dependency and will be fetched dynamically if `globalThis.Temporal` is not present.
+
 ## Compatibility
 IE9 and up, Edge, iOS Safari 6+, Chrome 8+, Firefox 6+
 
