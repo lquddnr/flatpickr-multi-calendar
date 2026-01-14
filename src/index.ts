@@ -32,6 +32,7 @@ import {
   getDefaultHours,
   calculateSecondsSinceMidnight,
   parseSeconds,
+  initTemporalPolyfill,
 } from "./utils/dates";
 
 import { tokenRegex, monthToStr } from "./utils/formatting";
@@ -81,6 +82,13 @@ function FlatpickrInstance(
   function setupHelperFunctions() {
     self.utils = {
       getDaysInMonth(month = self.currentMonth, yr = self.currentYear) {
+        if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+          const date = globalThis.Temporal.Now.plainDateISO()
+              .withCalendar(self.config.calendar)
+              .with({ year: yr, month: month + 1, day: 1 });
+          return date.daysInMonth;
+        }
+
         if (month === 1 && ((yr % 4 === 0 && yr % 100 !== 0) || yr % 400 === 0))
           return 29;
 
@@ -102,6 +110,26 @@ function FlatpickrInstance(
     if (!self.isMobile) build();
 
     bindEvents();
+
+    if (self.config.calendar !== "iso8601") {
+      initTemporalPolyfill().then(() => {
+         if (self.config.calendar !== "iso8601") {
+             // Re-setup dates and redraw to reflect the now-loaded polyfill
+             // We might need to re-calculate currentYear/currentMonth in target calendar
+             setupDates();
+             if (self.daysContainer) {
+               const days = buildDays();
+               if(days) {
+                  // buildDays appends to daysContainer, so it should be fine.
+                  // But we might need to clear and rebuild.
+                  // redraw() handles this.
+                  redraw();
+               }
+             }
+             updateNavigationCurrentMonth();
+         }
+      });
+    }
 
     if (self.selectedDates.length || self.config.noCalendar) {
       if (self.config.enableTime) {
@@ -682,11 +710,19 @@ function FlatpickrInstance(
     _dayNumber: number,
     i: number
   ) {
+    let dayText = date.getDate().toString();
+    if (self.config.calendar !== "iso8601" && self.config.useTemporalFormatting && globalThis.Temporal) {
+        const temporalDate = globalThis.Temporal.Instant.fromEpochMilliseconds(date.getTime())
+          .toZonedDateTimeISO(globalThis.Temporal.Now.timeZoneId())
+          .withCalendar(self.config.calendar);
+        dayText = temporalDate.day.toString();
+    }
+
     const dateIsEnabled = isEnabled(date, true),
       dayElement = createElement<DayElement>(
         "span",
         className,
-        date.getDate().toString()
+        dayText
       );
 
     dayElement.dateObj = date;
@@ -845,8 +881,17 @@ function FlatpickrInstance(
   }
 
   function buildMonthDays(year: number, month: number) {
-    const firstOfMonth =
+    let firstOfMonth =
       (new Date(year, month, 1).getDay() - self.l10n.firstDayOfWeek + 7) % 7;
+
+    if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+       const date = globalThis.Temporal.Now.plainDateISO()
+          .withCalendar(self.config.calendar)
+          .with({ year: year, month: month + 1, day: 1 }); // month is 0-based in args
+
+       const dayOfWeek = date.dayOfWeek === 7 ? 0 : date.dayOfWeek;
+       firstOfMonth = (dayOfWeek - self.l10n.firstDayOfWeek + 7) % 7;
+    }
 
     const prevMonthDays = self.utils.getDaysInMonth(
       (month - 1 + 12) % 12,
@@ -864,10 +909,38 @@ function FlatpickrInstance(
 
     // prepend days from the ending of previous month
     for (; dayNumber <= prevMonthDays; dayNumber++, dayIndex++) {
+      let date = new Date(year, month - 1, dayNumber);
+      if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+          try {
+             // We need to find the specific day in the previous month (calendar domain)
+             // `year` and `month` passed to this function are in the TARGET calendar domain.
+             // `month` is 0-based index.
+
+             // Construct the 1st of current month in target calendar
+             const currentMonthFirst = globalThis.Temporal.PlainDate.from({
+                 year: year,
+                 month: month + 1, // 0-based to 1-based
+                 day: 1,
+                 calendar: self.config.calendar
+             });
+
+             // Go to previous month
+             const prevMonthDate = currentMonthFirst.subtract({ months: 1 });
+
+             // Set the day number
+             const targetDate = prevMonthDate.with({ day: dayNumber });
+
+             // Convert to Gregorian Date for flatpickr internal storage
+             date = new Date(targetDate.withCalendar('iso8601').toZonedDateTime(globalThis.Temporal.Now.timeZoneId()).epochMilliseconds);
+          } catch(e) {
+             // fallback or ignore
+          }
+      }
+
       days.appendChild(
         createDay(
           `flatpickr-day ${prevMonthDayClass}`,
-          new Date(year, month - 1, dayNumber),
+          date,
           dayNumber,
           dayIndex
         )
@@ -876,10 +949,22 @@ function FlatpickrInstance(
 
     // Start at 1 since there is no 0th day
     for (dayNumber = 1; dayNumber <= daysInMonth; dayNumber++, dayIndex++) {
+      let date = new Date(year, month, dayNumber);
+      if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+          const targetDate = globalThis.Temporal.PlainDate.from({
+                 year: year,
+                 month: month + 1,
+                 day: dayNumber,
+                 calendar: self.config.calendar
+          });
+
+          date = new Date(targetDate.withCalendar('iso8601').toZonedDateTime(globalThis.Temporal.Now.timeZoneId()).epochMilliseconds);
+      }
+
       days.appendChild(
         createDay(
           "flatpickr-day",
-          new Date(year, month, dayNumber),
+          date,
           dayNumber,
           dayIndex
         )
@@ -893,10 +978,25 @@ function FlatpickrInstance(
       (self.config.showMonths === 1 || dayIndex % 7 !== 0);
       dayNum++, dayIndex++
     ) {
+      let date = new Date(year, month + 1, dayNum % daysInMonth);
+       if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+          const currentMonthFirst = globalThis.Temporal.PlainDate.from({
+                 year: year,
+                 month: month + 1,
+                 day: 1,
+                 calendar: self.config.calendar
+          });
+
+          const nextMonthDate = currentMonthFirst.add({ months: 1 });
+          const targetDate = nextMonthDate.with({ day: dayNum % daysInMonth });
+
+          date = new Date(targetDate.withCalendar('iso8601').toZonedDateTime(globalThis.Temporal.Now.timeZoneId()).epochMilliseconds);
+      }
+
       days.appendChild(
         createDay(
           `flatpickr-day ${nextMonthDayClass}`,
-          new Date(year, month + 1, dayNum % daysInMonth),
+          date,
           dayNum,
           dayIndex
         )
@@ -965,7 +1065,15 @@ function FlatpickrInstance(
 
     self.monthsDropdownContainer.innerHTML = "";
 
-    for (let i = 0; i < 12; i++) {
+    let monthsInYear = 12;
+    if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+      monthsInYear = globalThis.Temporal.Now.plainDateISO()
+          .withCalendar(self.config.calendar)
+          .with({ year: self.currentYear, month: 1, day: 1 })
+          .monthsInYear;
+    }
+
+    for (let i = 0; i < monthsInYear; i++) {
       if (!shouldBuildMonth(i)) continue;
 
       const month = createElement<HTMLOptionElement>(
@@ -974,11 +1082,19 @@ function FlatpickrInstance(
       );
 
       month.value = new Date(self.currentYear, i).getMonth().toString();
-      month.textContent = monthToStr(
-        i,
-        self.config.shorthandCurrentMonth,
-        self.l10n
-      );
+      if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+         const date = globalThis.Temporal.Now.plainDateISO()
+            .withCalendar(self.config.calendar)
+            .with({ year: self.currentYear, month: i + 1, day: 1 });
+         const monthName = date.toLocaleString(self.config.locale as string, { month: self.config.shorthandCurrentMonth ? "short" : "long", calendar: self.config.calendar });
+         month.textContent = monthName;
+      } else {
+        month.textContent = monthToStr(
+          i,
+          self.config.shorthandCurrentMonth,
+          self.l10n
+        );
+      }
       month.tabIndex = -1;
 
       if (self.currentMonth === i) {
@@ -1316,12 +1432,24 @@ function FlatpickrInstance(
 
     self.currentMonth += delta;
 
-    if (self.currentMonth < 0 || self.currentMonth > 11) {
-      self.currentYear += self.currentMonth > 11 ? 1 : -1;
-      self.currentMonth = (self.currentMonth + 12) % 12;
+    if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+      const date = globalThis.Temporal.PlainDate.from({
+          year: self.currentYear,
+          month: self.currentMonth + 1 - delta,
+          day: 1,
+          calendar: self.config.calendar
+      }).add({ months: delta });
 
-      triggerEvent("onYearChange");
-      buildMonthSwitch();
+      self.currentYear = date.year;
+      self.currentMonth = date.month - 1;
+    } else {
+      if (self.currentMonth < 0 || self.currentMonth > 11) {
+        self.currentYear += self.currentMonth > 11 ? 1 : -1;
+        self.currentMonth = (self.currentMonth + 12) % 12;
+
+        triggerEvent("onYearChange");
+        buildMonthSwitch();
+      }
     }
 
     buildDays();
@@ -2589,6 +2717,17 @@ function FlatpickrInstance(
 
     self.currentYear = self._initialDate.getFullYear();
     self.currentMonth = self._initialDate.getMonth();
+
+    if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+        // We can only do this if Temporal is loaded.
+        // If not loaded, initTemporalPolyfill in init() will trigger this again.
+        const date = globalThis.Temporal.Instant.fromEpochMilliseconds(self._initialDate.getTime())
+          .toZonedDateTimeISO(globalThis.Temporal.Now.timeZoneId())
+          .withCalendar(self.config.calendar);
+
+        self.currentYear = date.year;
+        self.currentMonth = date.month - 1; // Temporal 1-based
+    }
 
     if (self.selectedDates.length > 0)
       self.latestSelectedDateObj = self.selectedDates[0];

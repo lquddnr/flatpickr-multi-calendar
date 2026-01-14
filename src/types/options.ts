@@ -266,6 +266,12 @@ Use it along with "enableTime" to create a time picker. */
 
   /* See https://chmln.github.io/flatpickr/examples/#flatpickr-external-elements */
   wrap: boolean;
+
+  /* The calendar to use. Defaults to "iso8601" */
+  calendar: string;
+
+  /* Whether to use Temporal-based formatting. Defaults to false */
+  useTemporalFormatting: boolean;
 }
 
 export type Options = Partial<BaseOptions>;
@@ -339,6 +345,8 @@ export interface ParsedOptions {
   time_24hr: boolean;
   weekNumbers: boolean;
   wrap: boolean;
+  calendar: string;
+  useTemporalFormatting: boolean;
 }
 
 export const defaults: ParsedOptions = {
@@ -421,4 +429,6 @@ export const defaults: ParsedOptions = {
   time_24hr: false,
   weekNumbers: false,
   wrap: false,
+  calendar: "iso8601",
+  useTemporalFormatting: false,
 };

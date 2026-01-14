@@ -8,6 +8,22 @@ import {
 } from "./formatting";
 import { defaults, ParsedOptions } from "../types/options";
 import { english } from "../l10n/default";
+import { pad } from "../utils";
+
+declare global {
+  var Temporal: any;
+}
+
+export const initTemporalPolyfill = async () => {
+  try {
+    if (!globalThis.Temporal) {
+      const polyfill = await import("temporal-polyfill");
+      globalThis.Temporal = polyfill.Temporal;
+    }
+  } catch (e) {
+    console.error(e);
+  }
+};
 
 export interface FormatterArgs {
   config?: ParsedOptions;
@@ -28,6 +44,37 @@ export const createDateFormatter = ({
 
   if (config.formatDate !== undefined && !isMobile) {
     return config.formatDate(dateObj, frmt, locale);
+  }
+
+  if (config.useTemporalFormatting && config.calendar !== "iso8601" && globalThis.Temporal) {
+    const temporal = globalThis.Temporal.Instant.fromEpochMilliseconds(dateObj.getTime())
+      .toZonedDateTimeISO(globalThis.Temporal.Now.timeZoneId())
+      .withCalendar(config.calendar);
+
+    return frmt
+    .split("")
+    .map((c, i, arr) => {
+        if (arr[i - 1] === "\\") return c;
+
+        switch(c) {
+          case "Y": return pad(temporal.year, 4);
+          case "y": return String(temporal.year).substring(2);
+          case "m": return pad(temporal.month);
+          case "n": return temporal.month;
+          case "M": return temporal.toLocaleString(config.locale as string, { month: "short", calendar: config.calendar });
+          case "F": return temporal.toLocaleString(config.locale as string, { month: "long", calendar: config.calendar });
+          case "d": return pad(temporal.day);
+          case "j": return temporal.day;
+          case "D": return temporal.toLocaleString(config.locale as string, { weekday: "short", calendar: config.calendar });
+          case "l": return temporal.toLocaleString(config.locale as string, { weekday: "long", calendar: config.calendar });
+          case "w": return temporal.dayOfWeek % 7; // Temporal 1-7 (Mon-Sun), flatpickr 0-6 (Sun-Sat) - approximation
+          default:
+             return formats[c as token]
+                ? formats[c as token](dateObj, locale, config)
+                : c;
+        }
+    })
+    .join("");
   }
 
   return frmt
@@ -205,4 +252,59 @@ export function getDefaultHours(config: ParsedOptions) {
   }
 
   return { hours, minutes, seconds };
+}
+
+/**
+ * Converts a Date object or timestamp to a Temporal.ZonedDateTime object.
+ */
+export function toTemporalInstant(
+  date: Date | number,
+  calendarId: string = "iso8601"
+) {
+  const timestamp = date instanceof Date ? date.getTime() : date;
+
+  if (!globalThis.Temporal) {
+     return null;
+  }
+
+  return globalThis.Temporal.Instant.fromEpochMilliseconds(timestamp)
+    .toZonedDateTimeISO(globalThis.Temporal.Now.timeZoneId())
+    .withCalendar(calendarId);
+}
+
+/**
+ * Converts a Temporal object to a Date object.
+ */
+export function toDate(
+  temporal: any
+) {
+  if (!globalThis.Temporal) return new Date();
+
+  // If it's a ZonedDateTime or has epochMilliseconds (like Instant)
+  if (temporal.epochMilliseconds !== undefined) {
+    return new Date(temporal.epochMilliseconds);
+  }
+
+  // If it's a PlainDate or PlainDateTime, convert to ZonedDateTime first
+  // Assuming 'iso8601' for conversion back to JS Date
+  if (temporal.toZonedDateTime) {
+     return new Date(temporal.withCalendar('iso8601').toZonedDateTime(globalThis.Temporal.Now.timeZoneId()).epochMilliseconds);
+  }
+
+  return new Date();
+}
+
+/**
+ * Returns an object containing the ISO string, Date object, and Temporal object for a given date.
+ */
+export function convertDate(date: Date | number, calendarId: string = "iso8601") {
+    const temporal = toTemporalInstant(date, calendarId);
+    const dateObj = date instanceof Date ? date : new Date(date);
+    const isoString = dateObj.toISOString();
+
+    return {
+        iso: isoString,
+        date: dateObj,
+        temporal: temporal
+    };
 }
