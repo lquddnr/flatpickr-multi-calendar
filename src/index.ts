@@ -121,13 +121,8 @@ function FlatpickrInstance(
              // We might need to re-calculate currentYear/currentMonth in target calendar
              setupDates();
              if (self.daysContainer) {
-               const days = buildDays();
-               if(days) {
-                  // buildDays appends to daysContainer, so it should be fine.
-                  // But we might need to clear and rebuild.
-                  // redraw() handles this.
-                  redraw();
-               }
+               buildDays();
+               redraw();
              }
              updateNavigationCurrentMonth();
          }
