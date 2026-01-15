@@ -3044,7 +3044,16 @@ function FlatpickrInstance(
           : "";
     }
 
-    self.input.value = getDateStr(self.config.dateFormat);
+    // Force standard ISO formatting for the main input if enabled
+    const useTemporal = self.config.useTemporalFormatting;
+    if (self.config.calendar !== "iso8601") {
+       // Disable Temporal formatting for the internal value update to keep it Gregorian
+       self.config.useTemporalFormatting = false;
+       self.input.value = getDateStr(self.config.dateFormat);
+       self.config.useTemporalFormatting = useTemporal;
+    } else {
+       self.input.value = getDateStr(self.config.dateFormat);
+    }
 
     if (self.altInput !== undefined) {
       self.altInput.value = getDateStr(self.config.altFormat);

@@ -48,6 +48,16 @@ export const createDateFormatter = ({
     return config.formatDate(dateObj, frmt, locale);
   }
 
+  // Use Temporal formatting if enabled AND the format string matches altFormat (if set) OR we are not dealing with the standard dateFormat.
+  // This logic is a heuristic: if we are formatting the main input value (which usually uses dateFormat), we should probably stick to Gregorian/ISO
+  // if the user wants standard values. However, flatpickr doesn't explicitly tell us "this is for the input value".
+  // A cleaner approach is to check if useTemporalFormatting is explicitly true, but we assume the user MIGHT want standard ISO for value.
+  // BUT the user enabled "useTemporalFormatting".
+  // To solve the user request: "Internal data/Input box gets Gregorian, Alt gets Ethiopic".
+  // The easiest way is to modify `updateValue` in `index.ts` to disable this logic for the main input.
+  // So `createDateFormatter` stays consistent: "If useTemporalFormatting is on, I format temporally."
+  // We will handle the "Main Input Exception" in `updateValue`.
+
   if (config.useTemporalFormatting && config.calendar !== "iso8601" && globalThis.Temporal) {
     const temporal = toTemporalInstant(dateObj, config.calendar);
 
