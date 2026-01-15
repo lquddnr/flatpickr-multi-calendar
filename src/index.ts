@@ -966,7 +966,7 @@ function FlatpickrInstance(
         days.appendChild(
           createDay(
             `flatpickr-day ${prevMonthDayClass}`,
-            self.utils.toDate(new Temporal.PlainDate(year, month - 1, dayNumber, self.config.calendar)),
+            self.utils.toDate(Temporal.PlainDate.from({ year:year, month: month - 1, day: dayNumber, calendar:self.config.calendar})),
             dayNumber,
             dayIndex
           )
@@ -978,13 +978,7 @@ function FlatpickrInstance(
         days.appendChild(
           createDay(
             "flatpickr-day",
-            self.utils.toDate(
-              new Temporal.PlainDate(
-              year,
-              month,
-              dayNumber,
-              self.config.calendar
-            )),
+            self.utils.toDate(Temporal.PlainDate.from({ year:year, month: month, day: dayNumber, calendar:self.config.calendar})),
             dayNumber,
             dayIndex
           )
@@ -1001,14 +995,8 @@ function FlatpickrInstance(
         days.appendChild(
           createDay(
             `flatpickr-day ${nextMonthDayClass}`,
-            self.utils.toDate(
-              new Temporal.PlainDate(
-                year,
-                month + 1,
-                dayNum % daysInMonth,
-                self.config.calendar
-              )
-            ),
+              self.utils.toDate(Temporal.PlainDate.from({ year: year, month: month + 1, day: dayNum % daysInMonth, calendar: self.config.calendar})
+              ),
             dayNum,
             dayIndex
           )
