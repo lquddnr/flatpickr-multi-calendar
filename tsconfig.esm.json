@@ -4,7 +4,7 @@
     "compilerOptions": {
         "incremental": true,
         "target": "es5",
-        "module": "es2015",
+        "module": "es2020",
         "outDir": "dist/esm"
     }
 }

@@ -9,6 +9,24 @@ import {
 import { defaults, ParsedOptions } from "../types/options";
 import { english } from "../l10n/default";
 
+declare global {
+  var Temporal: any;
+}
+
+export const pad = (number: string | number, length = 2) =>
+  `000${number}`.slice(length * -1);
+
+export const initTemporalPolyfill = async () => {
+  try {
+    if (!globalThis.Temporal) {
+      const polyfill = await import("temporal-polyfill");
+      globalThis.Temporal = polyfill.Temporal;
+    }
+  } catch (e) {
+    console.error(e);
+  }
+};
+
 export interface FormatterArgs {
   config?: ParsedOptions;
   l10n?: Locale;
@@ -28,6 +46,45 @@ export const createDateFormatter = ({
 
   if (config.formatDate !== undefined && !isMobile) {
     return config.formatDate(dateObj, frmt, locale);
+  }
+
+  // Use Temporal formatting if enabled AND the format string matches altFormat (if set) OR we are not dealing with the standard dateFormat.
+  // This logic is a heuristic: if we are formatting the main input value (which usually uses dateFormat), we should probably stick to Gregorian/ISO
+  // if the user wants standard values. However, flatpickr doesn't explicitly tell us "this is for the input value".
+  // A cleaner approach is to check if useTemporalFormatting is explicitly true, but we assume the user MIGHT want standard ISO for value.
+  // BUT the user enabled "useTemporalFormatting".
+  // To solve the user request: "Internal data/Input box gets Gregorian, Alt gets Ethiopic".
+  // The easiest way is to modify `updateValue` in `index.ts` to disable this logic for the main input.
+  // So `createDateFormatter` stays consistent: "If useTemporalFormatting is on, I format temporally."
+  // We will handle the "Main Input Exception" in `updateValue`.
+
+  if (config.useTemporalFormatting && config.calendar !== "iso8601" && globalThis.Temporal) {
+    const temporal = toTemporalInstant(dateObj, config.calendar);
+
+    return frmt
+    .split("")
+    .map((c, i, arr) => {
+        if (arr[i - 1] === "\\") return c;
+
+        switch(c) {
+          case "Y": return pad(temporal.year, 4);
+          case "y": return String(temporal.year).substring(2);
+          case "m": return pad(temporal.month);
+          case "n": return temporal.month;
+          case "M": return temporal.toLocaleString(config.locale as string, { month: "short", calendar: config.calendar });
+          case "F": return temporal.toLocaleString(config.locale as string, { month: "long", calendar: config.calendar });
+          case "d": return pad(temporal.day);
+          case "j": return temporal.day;
+          case "D": return temporal.toLocaleString(config.locale as string, { weekday: "short", calendar: config.calendar });
+          case "l": return temporal.toLocaleString(config.locale as string, { weekday: "long", calendar: config.calendar });
+          case "w": return temporal.dayOfWeek % 7; // Temporal 1-7 (Mon-Sun), flatpickr 0-6 (Sun-Sat) - approximation
+          default:
+             return formats[c as token]
+                ? formats[c as token](dateObj, locale, config)
+                : c;
+        }
+    })
+    .join("");
   }
 
   return frmt
@@ -205,4 +262,65 @@ export function getDefaultHours(config: ParsedOptions) {
   }
 
   return { hours, minutes, seconds };
+}
+
+/**
+ * Converts a Date object or timestamp to a Temporal.ZonedDateTime object.
+ */
+export function toTemporalInstant(
+  date: Date | number,
+  calendarId: string = "iso8601"
+) {
+  if (!globalThis.Temporal) {
+     return null;
+  }
+
+  let instant;
+  if (date instanceof Date && typeof (date as any).toTemporalInstant === "function") {
+      instant = (date as any).toTemporalInstant();
+  } else {
+      const timestamp = date instanceof Date ? date.getTime() : date;
+      instant = globalThis.Temporal.Instant.fromEpochMilliseconds(timestamp);
+  }
+
+  return instant
+    .toZonedDateTimeISO(globalThis.Temporal.Now.timeZoneId())
+    .withCalendar(calendarId);
+}
+
+/**
+ * Converts a Temporal object to a Date object.
+ */
+export function toDate(
+  temporal: any
+) {
+  if (!globalThis.Temporal) return new Date();
+
+  // If it's a ZonedDateTime or has epochMilliseconds (like Instant)
+  if (temporal.epochMilliseconds !== undefined) {
+    return new Date(temporal.epochMilliseconds);
+  }
+
+  // If it's a PlainDate or PlainDateTime, convert to ZonedDateTime first
+  // Assuming 'iso8601' for conversion back to JS Date
+  if (temporal.toZonedDateTime) {
+     return new Date(temporal.withCalendar('iso8601').toZonedDateTime(globalThis.Temporal.Now.timeZoneId()).epochMilliseconds);
+  }
+
+  return new Date();
+}
+
+/**
+ * Returns an object containing the ISO string, Date object, and Temporal object for a given date.
+ */
+export function convertDate(date: Date | number, calendarId: string = "iso8601") {
+    const temporal = toTemporalInstant(date, calendarId);
+    const dateObj = date instanceof Date ? date : new Date(date);
+    const isoString = dateObj.toISOString();
+
+    return {
+        iso: isoString,
+        date: dateObj,
+        temporal: temporal
+    };
 }

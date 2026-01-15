@@ -8,7 +8,8 @@
     "build:build": "ts-node --transpile-only build.ts",
     "build:esm": "tsc -p tsconfig.esm.json",
     "build:types": "tsc -p tsconfig.declarations.json",
-    "build:post": "cp src/typings.d.ts dist/typings.d.ts",
+    "build:post": "ts-node --transpile-only build-post.ts",
+    "prepare": "npm run build",
     "fmt": "prettier --ignore-path .gitignore --trailing-comma es5 --write \"**/*.ts\"",
     "fmt:check": "prettier --ignore-path .gitignore --trailing-comma es5 --check \"**/*.ts\"",
     "start": "npm run build:build -- --dev",
@@ -46,7 +47,7 @@
     "rollup-plugin-typescript": "^1.0.1",
     "stylus": "latest",
     "terser": "^5.5.1",
-    "ts-jest": "^27.1.3",
+    "ts-jest": "^27.1.5",
     "ts-node": "^9.1.1",
     "tslib": "^2.0.3",
     "typescript": "^4.1.3"
@@ -75,8 +76,11 @@
     "lightweight"
   ],
   "browserslist": [
-    "ie >= 9",
     "last 2 versions",
-    "safari >= 7"
-  ]
+    "not ie <= 11",
+    "not dead"
+  ],
+  "dependencies": {
+    "temporal-polyfill": "^0.3.0"
+  }
 }

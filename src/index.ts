@@ -32,6 +32,9 @@ import {
   getDefaultHours,
   calculateSecondsSinceMidnight,
   parseSeconds,
+  initTemporalPolyfill,
+  toDate,
+  toTemporalInstant,
 } from "./utils/dates";
 
 import { tokenRegex, monthToStr } from "./utils/formatting";
@@ -81,11 +84,19 @@ function FlatpickrInstance(
   function setupHelperFunctions() {
     self.utils = {
       getDaysInMonth(month = self.currentMonth, yr = self.currentYear) {
+        if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+          const date = globalThis.Temporal.Now.plainDateISO()
+              .withCalendar(self.config.calendar)
+              .with({ year: yr, month: month + 1, day: 1 });
+          return date.daysInMonth;
+        }
+
         if (month === 1 && ((yr % 4 === 0 && yr % 100 !== 0) || yr % 400 === 0))
           return 29;
 
         return self.l10n.daysInMonth[month];
       },
+      toDate: toDate, // Expose toDate to internal utilities
     };
   }
 
@@ -102,6 +113,21 @@ function FlatpickrInstance(
     if (!self.isMobile) build();
 
     bindEvents();
+
+    if (self.config.calendar !== "iso8601") {
+      initTemporalPolyfill().then(() => {
+         if (self.config && self.config.calendar !== "iso8601") {
+             // Re-setup dates and redraw to reflect the now-loaded polyfill
+             // We might need to re-calculate currentYear/currentMonth in target calendar
+             setupDates();
+             if (self.daysContainer) {
+               buildDays();
+               redraw();
+             }
+             updateNavigationCurrentMonth();
+         }
+      });
+    }
 
     if (self.selectedDates.length || self.config.noCalendar) {
       if (self.config.enableTime) {
@@ -516,6 +542,12 @@ function FlatpickrInstance(
       if (jumpTo !== undefined) {
         self.currentYear = jumpTo.getFullYear();
         self.currentMonth = jumpTo.getMonth();
+
+        if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+             const temporalDate = toTemporalInstant(jumpTo, self.config.calendar);
+             self.currentYear = temporalDate.year;
+             self.currentMonth = temporalDate.month - 1;
+        }
       }
     } catch (e) {
       /* istanbul ignore next */
@@ -682,11 +714,17 @@ function FlatpickrInstance(
     _dayNumber: number,
     i: number
   ) {
+    let dayText = date.getDate().toString();
+    if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+        const temporalDate = toTemporalInstant(date, self.config.calendar);
+        dayText = temporalDate.day.toString();
+    }
+
     const dateIsEnabled = isEnabled(date, true),
       dayElement = createElement<DayElement>(
         "span",
         className,
-        date.getDate().toString()
+        dayText
       );
 
     dayElement.dateObj = date;
@@ -845,62 +883,130 @@ function FlatpickrInstance(
   }
 
   function buildMonthDays(year: number, month: number) {
-    const firstOfMonth =
-      (new Date(year, month, 1).getDay() - self.l10n.firstDayOfWeek + 7) % 7;
+    const days = window.document.createDocumentFragment();
+    const isMultiMonth = self.config.showMonths > 1;
+    const prevMonthDayClass = isMultiMonth ? "prevMonthDay hidden" : "prevMonthDay";
+    const nextMonthDayClass = isMultiMonth ? "nextMonthDay hidden" : "nextMonthDay";
 
-    const prevMonthDays = self.utils.getDaysInMonth(
-      (month - 1 + 12) % 12,
-      year
-    );
+    if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+        // Temporal-based rendering logic
+        const currentMonthFirst = globalThis.Temporal.Now.plainDateISO()
+          .withCalendar(self.config.calendar)
+          .with({ year: year, month: month + 1, day: 1 }); // month is 0-based
 
-    const daysInMonth = self.utils.getDaysInMonth(month, year),
-      days = window.document.createDocumentFragment(),
-      isMultiMonth = self.config.showMonths > 1,
-      prevMonthDayClass = isMultiMonth ? "prevMonthDay hidden" : "prevMonthDay",
-      nextMonthDayClass = isMultiMonth ? "nextMonthDay hidden" : "nextMonthDay";
+        const dayOfWeek = currentMonthFirst.dayOfWeek === 7 ? 0 : currentMonthFirst.dayOfWeek;
+        const daysFromPrevMonth = (dayOfWeek - self.l10n.firstDayOfWeek + 7) % 7;
 
-    let dayNumber = prevMonthDays + 1 - firstOfMonth,
-      dayIndex = 0;
+        let iterDate = currentMonthFirst.subtract({ days: daysFromPrevMonth });
 
-    // prepend days from the ending of previous month
-    for (; dayNumber <= prevMonthDays; dayNumber++, dayIndex++) {
-      days.appendChild(
-        createDay(
-          `flatpickr-day ${prevMonthDayClass}`,
-          new Date(year, month - 1, dayNumber),
-          dayNumber,
-          dayIndex
-        )
-      );
-    }
+        for (let i = 0; i < 42; i++) {
+            // Determine class
+            // Check if month matches `month + 1`
+            // iterDate.month is 1-based
+            let className = "flatpickr-day";
 
-    // Start at 1 since there is no 0th day
-    for (dayNumber = 1; dayNumber <= daysInMonth; dayNumber++, dayIndex++) {
-      days.appendChild(
-        createDay(
-          "flatpickr-day",
-          new Date(year, month, dayNumber),
-          dayNumber,
-          dayIndex
-        )
-      );
-    }
+            // Compare years and months to detect prev/next
+            // Note: We need to handle year boundaries too.
+            // Simplest way: compare with currentMonthFirst range
 
-    // append days from the next month
-    for (
-      let dayNum = daysInMonth + 1;
-      dayNum <= 42 - firstOfMonth &&
-      (self.config.showMonths === 1 || dayIndex % 7 !== 0);
-      dayNum++, dayIndex++
-    ) {
-      days.appendChild(
-        createDay(
-          `flatpickr-day ${nextMonthDayClass}`,
-          new Date(year, month + 1, dayNum % daysInMonth),
-          dayNum,
-          dayIndex
-        )
-      );
+            const isPrevMonth =
+                (iterDate.year < currentMonthFirst.year) ||
+                (iterDate.year === currentMonthFirst.year && iterDate.month < currentMonthFirst.month);
+
+            const isNextMonth =
+                (iterDate.year > currentMonthFirst.year) ||
+                (iterDate.year === currentMonthFirst.year && iterDate.month > currentMonthFirst.month);
+
+            if (isPrevMonth) {
+                className += ` ${prevMonthDayClass}`;
+            } else if (isNextMonth) {
+                className += ` ${nextMonthDayClass}`;
+                if (self.config.showMonths === 1 && i % 7 === 0) {
+                    // If we have started a full week of next month days, stop if single month view
+                    // To match original behavior:
+                    // "and (self.config.showMonths === 1 || dayIndex % 7 !== 0)"
+                    // The loop continues until 42 usually, but breaks if we filled enough.
+                    // Let's stick to 42 for consistency or break if needed.
+                    // The original loop condition for next days: `dayNum <= 42 - firstOfMonth`
+                    // We can just break here to avoid extra rows if 6 weeks are not needed?
+                    // Flatpickr usually renders 6 rows (42 cells).
+                }
+            }
+
+            const dateObj = self.utils.toDate(iterDate);
+            // Day number for display
+            // createDay will re-extract it from dateObj using toTemporalInstant if configured,
+            // or we can pass it via some side channel, but createDay API takes (className, date, dayNumber, i)
+            // dayNumber is used for textContent if standard.
+            // In our modified createDay, we use Temporal to get text if configured.
+            // So we can pass `iterDate.day` as dayNumber argument, createDay might ignore it if it recalculates.
+
+            days.appendChild(
+                createDay(
+                    className,
+                    dateObj,
+                    iterDate.day,
+                    i
+                )
+            );
+
+            iterDate = iterDate.add({ days: 1 });
+        }
+    } else {
+        // Standard ISO8601 Logic
+        const firstOfMonth =
+        (new Date(year, month, 1).getDay() - self.l10n.firstDayOfWeek + 7) % 7;
+
+        const prevMonthDays = self.utils.getDaysInMonth(
+        (month - 1 + 12) % 12,
+        year
+        );
+
+        const daysInMonth = self.utils.getDaysInMonth(month, year);
+
+        let dayNumber = prevMonthDays + 1 - firstOfMonth,
+        dayIndex = 0;
+
+        // prepend days from the ending of previous month
+        for (; dayNumber <= prevMonthDays; dayNumber++, dayIndex++) {
+        days.appendChild(
+            createDay(
+            `flatpickr-day ${prevMonthDayClass}`,
+            new Date(year, month - 1, dayNumber),
+            dayNumber,
+            dayIndex
+            )
+        );
+        }
+
+        // Start at 1 since there is no 0th day
+        for (dayNumber = 1; dayNumber <= daysInMonth; dayNumber++, dayIndex++) {
+        days.appendChild(
+            createDay(
+            "flatpickr-day",
+            new Date(year, month, dayNumber),
+            dayNumber,
+            dayIndex
+            )
+        );
+        }
+
+        // append days from the next month
+        for (
+        let dayNum = daysInMonth + 1;
+        dayNum <= 42 - firstOfMonth &&
+        (self.config.showMonths === 1 || dayIndex % 7 !== 0);
+        dayNum++, dayIndex++
+        ) {
+        days.appendChild(
+            createDay(
+            `flatpickr-day ${nextMonthDayClass}`,
+            new Date(year, month + 1, dayNum % daysInMonth),
+            dayNum,
+            dayIndex
+            )
+        );
+        }
     }
 
     //updateNavigationCurrentMonth();
@@ -924,10 +1030,27 @@ function FlatpickrInstance(
     const frag = document.createDocumentFragment();
 
     for (let i = 0; i < self.config.showMonths; i++) {
-      const d = new Date(self.currentYear, self.currentMonth, 1);
-      d.setMonth(self.currentMonth + i);
+      let year = self.currentYear;
+      let month = self.currentMonth;
 
-      frag.appendChild(buildMonthDays(d.getFullYear(), d.getMonth()));
+      if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+         const currentMonthDate = globalThis.Temporal.PlainDate.from({
+           year: self.currentYear,
+           month: self.currentMonth + 1,
+           day: 1,
+           calendar: self.config.calendar
+         }).add({ months: i });
+
+         year = currentMonthDate.year;
+         month = currentMonthDate.month - 1;
+      } else {
+         const d = new Date(self.currentYear, self.currentMonth, 1);
+         d.setMonth(self.currentMonth + i);
+         year = d.getFullYear();
+         month = d.getMonth();
+      }
+
+      frag.appendChild(buildMonthDays(year, month));
     }
 
     self.daysContainer.appendChild(frag);
@@ -965,7 +1088,15 @@ function FlatpickrInstance(
 
     self.monthsDropdownContainer.innerHTML = "";
 
-    for (let i = 0; i < 12; i++) {
+    let monthsInYear = 12;
+    if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+      monthsInYear = globalThis.Temporal.Now.plainDateISO()
+          .withCalendar(self.config.calendar)
+          .with({ year: self.currentYear, month: 1, day: 1 })
+          .monthsInYear;
+    }
+
+    for (let i = 0; i < monthsInYear; i++) {
       if (!shouldBuildMonth(i)) continue;
 
       const month = createElement<HTMLOptionElement>(
@@ -973,12 +1104,21 @@ function FlatpickrInstance(
         "flatpickr-monthDropdown-month"
       );
 
-      month.value = new Date(self.currentYear, i).getMonth().toString();
-      month.textContent = monthToStr(
-        i,
-        self.config.shorthandCurrentMonth,
-        self.l10n
-      );
+      if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+         month.value = i.toString();
+         const date = globalThis.Temporal.Now.plainDateISO()
+            .withCalendar(self.config.calendar)
+            .with({ year: self.currentYear, month: i + 1, day: 1 });
+         const monthName = date.toLocaleString(self.config.locale as string, { month: self.config.shorthandCurrentMonth ? "short" : "long", calendar: self.config.calendar });
+         month.textContent = monthName;
+      } else {
+        month.value = new Date(self.currentYear, i).getMonth().toString();
+        month.textContent = monthToStr(
+          i,
+          self.config.shorthandCurrentMonth,
+          self.l10n
+        );
+      }
       month.tabIndex = -1;
 
       if (self.currentMonth === i) {
@@ -1316,12 +1456,24 @@ function FlatpickrInstance(
 
     self.currentMonth += delta;
 
-    if (self.currentMonth < 0 || self.currentMonth > 11) {
-      self.currentYear += self.currentMonth > 11 ? 1 : -1;
-      self.currentMonth = (self.currentMonth + 12) % 12;
+    if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+      const date = globalThis.Temporal.PlainDate.from({
+          year: self.currentYear,
+          month: self.currentMonth + 1 - delta,
+          day: 1,
+          calendar: self.config.calendar
+      }).add({ months: delta });
 
-      triggerEvent("onYearChange");
-      buildMonthSwitch();
+      self.currentYear = date.year;
+      self.currentMonth = date.month - 1;
+    } else {
+      if (self.currentMonth < 0 || self.currentMonth > 11) {
+        self.currentYear += self.currentMonth > 11 ? 1 : -1;
+        self.currentMonth = (self.currentMonth + 12) % 12;
+
+        triggerEvent("onYearChange");
+        buildMonthSwitch();
+      }
     }
 
     buildDays();
@@ -2590,6 +2742,15 @@ function FlatpickrInstance(
     self.currentYear = self._initialDate.getFullYear();
     self.currentMonth = self._initialDate.getMonth();
 
+    if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+        // We can only do this if Temporal is loaded.
+        // If not loaded, initTemporalPolyfill in init() will trigger this again.
+        const date = toTemporalInstant(self._initialDate, self.config.calendar);
+
+        self.currentYear = date.year;
+        self.currentMonth = date.month - 1; // Temporal 1-based
+    }
+
     if (self.selectedDates.length > 0)
       self.latestSelectedDateObj = self.selectedDates[0];
 
@@ -2777,37 +2938,79 @@ function FlatpickrInstance(
     if (self.config.noCalendar || self.isMobile || !self.monthNav) return;
 
     self.yearElements.forEach((yearElement, i) => {
-      const d = new Date(self.currentYear, self.currentMonth, 1);
-      d.setMonth(self.currentMonth + i);
+      let year = self.currentYear;
+      let month = self.currentMonth;
+
+      if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+          const date = globalThis.Temporal.PlainDate.from({
+              year: self.currentYear,
+              month: self.currentMonth + 1,
+              day: 1,
+              calendar: self.config.calendar
+          }).add({ months: i });
+          year = date.year;
+          month = date.month - 1; // 0-based for flatpickr/value
+      } else {
+          const d = new Date(self.currentYear, self.currentMonth, 1);
+          d.setMonth(self.currentMonth + i);
+          year = d.getFullYear();
+          month = d.getMonth();
+      }
 
       if (
         self.config.showMonths > 1 ||
         self.config.monthSelectorType === "static"
       ) {
-        self.monthElements[i].textContent =
-          monthToStr(
-            d.getMonth(),
-            self.config.shorthandCurrentMonth,
-            self.l10n
-          ) + " ";
+         if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+             const date = globalThis.Temporal.PlainDate.from({
+                 year: year,
+                 month: month + 1,
+                 day: 1,
+                 calendar: self.config.calendar
+             });
+             const monthName = date.toLocaleString(self.config.locale as string, { month: self.config.shorthandCurrentMonth ? "short" : "long", calendar: self.config.calendar });
+             self.monthElements[i].textContent = monthName + " ";
+         } else {
+             self.monthElements[i].textContent =
+            monthToStr(
+                month,
+                self.config.shorthandCurrentMonth,
+                self.l10n
+            ) + " ";
+         }
       } else {
-        self.monthsDropdownContainer.value = d.getMonth().toString();
+        self.monthsDropdownContainer.value = month.toString();
       }
 
-      yearElement.value = d.getFullYear().toString();
+      yearElement.value = year.toString();
     });
 
-    self._hidePrevMonthArrow =
-      self.config.minDate !== undefined &&
-      (self.currentYear === self.config.minDate.getFullYear()
-        ? self.currentMonth <= self.config.minDate.getMonth()
-        : self.currentYear < self.config.minDate.getFullYear());
+    if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+         const minDateTemporal = self.config.minDate ? toTemporalInstant(self.config.minDate, self.config.calendar) : null;
+         const maxDateTemporal = self.config.maxDate ? toTemporalInstant(self.config.maxDate, self.config.calendar) : null;
 
-    self._hideNextMonthArrow =
-      self.config.maxDate !== undefined &&
-      (self.currentYear === self.config.maxDate.getFullYear()
-        ? self.currentMonth + 1 > self.config.maxDate.getMonth()
-        : self.currentYear > self.config.maxDate.getFullYear());
+         if (minDateTemporal) {
+            self._hidePrevMonthArrow =
+                (self.currentYear === minDateTemporal.year ? self.currentMonth <= (minDateTemporal.month - 1) : self.currentYear < minDateTemporal.year);
+         }
+
+         if (maxDateTemporal) {
+             self._hideNextMonthArrow =
+                (self.currentYear === maxDateTemporal.year ? self.currentMonth + 1 > (maxDateTemporal.month - 1) : self.currentYear > maxDateTemporal.year);
+         }
+    } else {
+        self._hidePrevMonthArrow =
+        self.config.minDate !== undefined &&
+        (self.currentYear === self.config.minDate.getFullYear()
+            ? self.currentMonth <= self.config.minDate.getMonth()
+            : self.currentYear < self.config.minDate.getFullYear());
+
+        self._hideNextMonthArrow =
+        self.config.maxDate !== undefined &&
+        (self.currentYear === self.config.maxDate.getFullYear()
+            ? self.currentMonth + 1 > self.config.maxDate.getMonth()
+            : self.currentYear > self.config.maxDate.getFullYear());
+    }
   }
 
   function getDateStr(specificFormat?: string) {
@@ -2841,7 +3044,16 @@ function FlatpickrInstance(
           : "";
     }
 
-    self.input.value = getDateStr(self.config.dateFormat);
+    // Force standard ISO formatting for the main input if enabled
+    const useTemporal = self.config.useTemporalFormatting;
+    if (self.config.calendar !== "iso8601") {
+       // Disable Temporal formatting for the internal value update to keep it Gregorian
+       self.config.useTemporalFormatting = false;
+       self.input.value = getDateStr(self.config.dateFormat);
+       self.config.useTemporalFormatting = useTemporal;
+    } else {
+       self.input.value = getDateStr(self.config.dateFormat);
+    }
 
     if (self.altInput !== undefined) {
       self.altInput.value = getDateStr(self.config.altFormat);
