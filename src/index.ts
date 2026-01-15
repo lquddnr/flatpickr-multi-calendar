@@ -964,24 +964,30 @@ function FlatpickrInstance(
         // prepend days from the ending of previous month
         for (; dayNumber <= prevMonthDays; dayNumber++, dayIndex++) {
         days.appendChild(
-            createDay(
+          createDay(
             `flatpickr-day ${prevMonthDayClass}`,
-            new Date(year, month - 1, dayNumber),
+            self.utils.toDate(new Temporal.PlainDate(year, month - 1, dayNumber, self.config.calendar)),
             dayNumber,
             dayIndex
-            )
+          )
         );
         }
 
         // Start at 1 since there is no 0th day
         for (dayNumber = 1; dayNumber <= daysInMonth; dayNumber++, dayIndex++) {
         days.appendChild(
-            createDay(
+          createDay(
             "flatpickr-day",
-            new Date(year, month, dayNumber),
+            self.utils.toDate(
+              new Temporal.PlainDate(
+              year,
+              month,
+              dayNumber,
+              self.config.calendar
+            )),
             dayNumber,
             dayIndex
-            )
+          )
         );
         }
 
@@ -993,17 +999,24 @@ function FlatpickrInstance(
         dayNum++, dayIndex++
         ) {
         days.appendChild(
-            createDay(
+          createDay(
             `flatpickr-day ${nextMonthDayClass}`,
-            new Date(year, month + 1, dayNum % daysInMonth),
+            self.utils.toDate(
+              new Temporal.PlainDate(
+                year,
+                month + 1,
+                dayNum % daysInMonth,
+                self.config.calendar
+              )
+            ),
             dayNum,
             dayIndex
-            )
+          )
         );
         }
     }
 
-    //updateNavigationCurrentMonth();
+    // updateNavigationCurrentMonth();
 
     const dayContainer = createElement<HTMLDivElement>("div", "dayContainer");
     dayContainer.appendChild(days);
