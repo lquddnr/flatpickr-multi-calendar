@@ -709,7 +709,7 @@ function FlatpickrInstance(
     i: number
   ) {
     let dayText = date.getDate().toString();
-    if (self.config.calendar !== "iso8601" && self.config.useTemporalFormatting && globalThis.Temporal) {
+    if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
         const temporalDate = toTemporalInstant(date, self.config.calendar);
         dayText = temporalDate.day.toString();
     }
@@ -877,126 +877,130 @@ function FlatpickrInstance(
   }
 
   function buildMonthDays(year: number, month: number) {
-    let firstOfMonth =
-      (new Date(year, month, 1).getDay() - self.l10n.firstDayOfWeek + 7) % 7;
+    const days = window.document.createDocumentFragment();
+    const isMultiMonth = self.config.showMonths > 1;
+    const prevMonthDayClass = isMultiMonth ? "prevMonthDay hidden" : "prevMonthDay";
+    const nextMonthDayClass = isMultiMonth ? "nextMonthDay hidden" : "nextMonthDay";
 
     if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
-       const date = globalThis.Temporal.Now.plainDateISO()
+        // Temporal-based rendering logic
+        const currentMonthFirst = globalThis.Temporal.Now.plainDateISO()
           .withCalendar(self.config.calendar)
-          .with({ year: year, month: month + 1, day: 1 }); // month is 0-based in args
+          .with({ year: year, month: month + 1, day: 1 }); // month is 0-based
 
-       const dayOfWeek = date.dayOfWeek === 7 ? 0 : date.dayOfWeek;
-       firstOfMonth = (dayOfWeek - self.l10n.firstDayOfWeek + 7) % 7;
-    }
+        const dayOfWeek = currentMonthFirst.dayOfWeek === 7 ? 0 : currentMonthFirst.dayOfWeek;
+        const daysFromPrevMonth = (dayOfWeek - self.l10n.firstDayOfWeek + 7) % 7;
 
-    const prevMonthDays = self.utils.getDaysInMonth(
-      (month - 1 + 12) % 12,
-      year
-    );
+        let iterDate = currentMonthFirst.subtract({ days: daysFromPrevMonth });
 
-    const daysInMonth = self.utils.getDaysInMonth(month, year),
-      days = window.document.createDocumentFragment(),
-      isMultiMonth = self.config.showMonths > 1,
-      prevMonthDayClass = isMultiMonth ? "prevMonthDay hidden" : "prevMonthDay",
-      nextMonthDayClass = isMultiMonth ? "nextMonthDay hidden" : "nextMonthDay";
+        for (let i = 0; i < 42; i++) {
+            // Determine class
+            // Check if month matches `month + 1`
+            // iterDate.month is 1-based
+            let className = "flatpickr-day";
 
-    let dayNumber = prevMonthDays + 1 - firstOfMonth,
-      dayIndex = 0;
+            // Compare years and months to detect prev/next
+            // Note: We need to handle year boundaries too.
+            // Simplest way: compare with currentMonthFirst range
 
-    // prepend days from the ending of previous month
-    for (; dayNumber <= prevMonthDays; dayNumber++, dayIndex++) {
-      let date = new Date(year, month - 1, dayNumber);
-      if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
-          try {
-             // We need to find the specific day in the previous month (calendar domain)
-             // `year` and `month` passed to this function are in the TARGET calendar domain.
-             // `month` is 0-based index.
+            const isPrevMonth =
+                (iterDate.year < currentMonthFirst.year) ||
+                (iterDate.year === currentMonthFirst.year && iterDate.month < currentMonthFirst.month);
 
-             // Construct the 1st of current month in target calendar
-             const currentMonthFirst = globalThis.Temporal.PlainDate.from({
-                 year: year,
-                 month: month + 1, // 0-based to 1-based
-                 day: 1,
-                 calendar: self.config.calendar
-             });
+            const isNextMonth =
+                (iterDate.year > currentMonthFirst.year) ||
+                (iterDate.year === currentMonthFirst.year && iterDate.month > currentMonthFirst.month);
 
-             // Go to previous month
-             const prevMonthDate = currentMonthFirst.subtract({ months: 1 });
+            if (isPrevMonth) {
+                className += ` ${prevMonthDayClass}`;
+            } else if (isNextMonth) {
+                className += ` ${nextMonthDayClass}`;
+                if (self.config.showMonths === 1 && i % 7 === 0) {
+                    // If we have started a full week of next month days, stop if single month view
+                    // To match original behavior:
+                    // "and (self.config.showMonths === 1 || dayIndex % 7 !== 0)"
+                    // The loop continues until 42 usually, but breaks if we filled enough.
+                    // Let's stick to 42 for consistency or break if needed.
+                    // The original loop condition for next days: `dayNum <= 42 - firstOfMonth`
+                    // We can just break here to avoid extra rows if 6 weeks are not needed?
+                    // Flatpickr usually renders 6 rows (42 cells).
+                }
+            }
 
-             // Set the day number
-             const targetDate = prevMonthDate.with({ day: dayNumber });
+            const dateObj = self.utils.toDate(iterDate);
+            // Day number for display
+            // createDay will re-extract it from dateObj using toTemporalInstant if configured,
+            // or we can pass it via some side channel, but createDay API takes (className, date, dayNumber, i)
+            // dayNumber is used for textContent if standard.
+            // In our modified createDay, we use Temporal to get text if configured.
+            // So we can pass `iterDate.day` as dayNumber argument, createDay might ignore it if it recalculates.
 
-             // Convert to Gregorian Date for flatpickr internal storage
-             date = self.utils.toDate(targetDate);
-          } catch(e) {
-             // fallback or ignore
-          }
-      }
+            days.appendChild(
+                createDay(
+                    className,
+                    dateObj,
+                    iterDate.day,
+                    i
+                )
+            );
 
-      days.appendChild(
-        createDay(
-          `flatpickr-day ${prevMonthDayClass}`,
-          date,
-          dayNumber,
-          dayIndex
-        )
-      );
-    }
+            iterDate = iterDate.add({ days: 1 });
+        }
+    } else {
+        // Standard ISO8601 Logic
+        const firstOfMonth =
+        (new Date(year, month, 1).getDay() - self.l10n.firstDayOfWeek + 7) % 7;
 
-    // Start at 1 since there is no 0th day
-    for (dayNumber = 1; dayNumber <= daysInMonth; dayNumber++, dayIndex++) {
-      let date = new Date(year, month, dayNumber);
-      if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
-          const targetDate = globalThis.Temporal.PlainDate.from({
-                 year: year,
-                 month: month + 1,
-                 day: dayNumber,
-                 calendar: self.config.calendar
-          });
+        const prevMonthDays = self.utils.getDaysInMonth(
+        (month - 1 + 12) % 12,
+        year
+        );
 
-          date = self.utils.toDate(targetDate);
-      }
+        const daysInMonth = self.utils.getDaysInMonth(month, year);
 
-      days.appendChild(
-        createDay(
-          "flatpickr-day",
-          date,
-          dayNumber,
-          dayIndex
-        )
-      );
-    }
+        let dayNumber = prevMonthDays + 1 - firstOfMonth,
+        dayIndex = 0;
 
-    // append days from the next month
-    for (
-      let dayNum = daysInMonth + 1;
-      dayNum <= 42 - firstOfMonth &&
-      (self.config.showMonths === 1 || dayIndex % 7 !== 0);
-      dayNum++, dayIndex++
-    ) {
-      let date = new Date(year, month + 1, dayNum % daysInMonth);
-       if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
-          const currentMonthFirst = globalThis.Temporal.PlainDate.from({
-                 year: year,
-                 month: month + 1,
-                 day: 1,
-                 calendar: self.config.calendar
-          });
+        // prepend days from the ending of previous month
+        for (; dayNumber <= prevMonthDays; dayNumber++, dayIndex++) {
+        days.appendChild(
+            createDay(
+            `flatpickr-day ${prevMonthDayClass}`,
+            new Date(year, month - 1, dayNumber),
+            dayNumber,
+            dayIndex
+            )
+        );
+        }
 
-          const nextMonthDate = currentMonthFirst.add({ months: 1 });
-          const targetDate = nextMonthDate.with({ day: dayNum % daysInMonth });
+        // Start at 1 since there is no 0th day
+        for (dayNumber = 1; dayNumber <= daysInMonth; dayNumber++, dayIndex++) {
+        days.appendChild(
+            createDay(
+            "flatpickr-day",
+            new Date(year, month, dayNumber),
+            dayNumber,
+            dayIndex
+            )
+        );
+        }
 
-          date = self.utils.toDate(targetDate);
-      }
-
-      days.appendChild(
-        createDay(
-          `flatpickr-day ${nextMonthDayClass}`,
-          date,
-          dayNum,
-          dayIndex
-        )
-      );
+        // append days from the next month
+        for (
+        let dayNum = daysInMonth + 1;
+        dayNum <= 42 - firstOfMonth &&
+        (self.config.showMonths === 1 || dayIndex % 7 !== 0);
+        dayNum++, dayIndex++
+        ) {
+        days.appendChild(
+            createDay(
+            `flatpickr-day ${nextMonthDayClass}`,
+            new Date(year, month + 1, dayNum % daysInMonth),
+            dayNum,
+            dayIndex
+            )
+        );
+        }
     }
 
     //updateNavigationCurrentMonth();
@@ -1020,10 +1024,27 @@ function FlatpickrInstance(
     const frag = document.createDocumentFragment();
 
     for (let i = 0; i < self.config.showMonths; i++) {
-      const d = new Date(self.currentYear, self.currentMonth, 1);
-      d.setMonth(self.currentMonth + i);
+      let year = self.currentYear;
+      let month = self.currentMonth;
 
-      frag.appendChild(buildMonthDays(d.getFullYear(), d.getMonth()));
+      if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+         const currentMonthDate = globalThis.Temporal.PlainDate.from({
+           year: self.currentYear,
+           month: self.currentMonth + 1,
+           day: 1,
+           calendar: self.config.calendar
+         }).add({ months: i });
+
+         year = currentMonthDate.year;
+         month = currentMonthDate.month - 1;
+      } else {
+         const d = new Date(self.currentYear, self.currentMonth, 1);
+         d.setMonth(self.currentMonth + i);
+         year = d.getFullYear();
+         month = d.getMonth();
+      }
+
+      frag.appendChild(buildMonthDays(year, month));
     }
 
     self.daysContainer.appendChild(frag);
