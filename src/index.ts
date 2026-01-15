@@ -116,7 +116,7 @@ function FlatpickrInstance(
 
     if (self.config.calendar !== "iso8601") {
       initTemporalPolyfill().then(() => {
-         if (self.config.calendar !== "iso8601") {
+         if (self.config && self.config.calendar !== "iso8601") {
              // Re-setup dates and redraw to reflect the now-loaded polyfill
              // We might need to re-calculate currentYear/currentMonth in target calendar
              setupDates();
@@ -542,6 +542,12 @@ function FlatpickrInstance(
       if (jumpTo !== undefined) {
         self.currentYear = jumpTo.getFullYear();
         self.currentMonth = jumpTo.getMonth();
+
+        if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+             const temporalDate = toTemporalInstant(jumpTo, self.config.calendar);
+             self.currentYear = temporalDate.year;
+             self.currentMonth = temporalDate.month - 1;
+        }
       }
     } catch (e) {
       /* istanbul ignore next */
@@ -964,24 +970,24 @@ function FlatpickrInstance(
         // prepend days from the ending of previous month
         for (; dayNumber <= prevMonthDays; dayNumber++, dayIndex++) {
         days.appendChild(
-          createDay(
+            createDay(
             `flatpickr-day ${prevMonthDayClass}`,
-            self.utils.toDate(Temporal.PlainDate.from({ year:year, month: month - 1, day: dayNumber, calendar:self.config.calendar})),
+            new Date(year, month - 1, dayNumber),
             dayNumber,
             dayIndex
-          )
+            )
         );
         }
 
         // Start at 1 since there is no 0th day
         for (dayNumber = 1; dayNumber <= daysInMonth; dayNumber++, dayIndex++) {
         days.appendChild(
-          createDay(
+            createDay(
             "flatpickr-day",
-            self.utils.toDate(Temporal.PlainDate.from({ year:year, month: month, day: dayNumber, calendar:self.config.calendar})),
+            new Date(year, month, dayNumber),
             dayNumber,
             dayIndex
-          )
+            )
         );
         }
 
@@ -993,18 +999,17 @@ function FlatpickrInstance(
         dayNum++, dayIndex++
         ) {
         days.appendChild(
-          createDay(
+            createDay(
             `flatpickr-day ${nextMonthDayClass}`,
-              self.utils.toDate(Temporal.PlainDate.from({ year: year, month: month + 1, day: dayNum % daysInMonth, calendar: self.config.calendar})
-              ),
+            new Date(year, month + 1, dayNum % daysInMonth),
             dayNum,
             dayIndex
-          )
+            )
         );
         }
     }
 
-    // updateNavigationCurrentMonth();
+    //updateNavigationCurrentMonth();
 
     const dayContainer = createElement<HTMLDivElement>("div", "dayContainer");
     dayContainer.appendChild(days);
@@ -2933,37 +2938,79 @@ function FlatpickrInstance(
     if (self.config.noCalendar || self.isMobile || !self.monthNav) return;
 
     self.yearElements.forEach((yearElement, i) => {
-      const d = new Date(self.currentYear, self.currentMonth, 1);
-      d.setMonth(self.currentMonth + i);
+      let year = self.currentYear;
+      let month = self.currentMonth;
+
+      if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+          const date = globalThis.Temporal.PlainDate.from({
+              year: self.currentYear,
+              month: self.currentMonth + 1,
+              day: 1,
+              calendar: self.config.calendar
+          }).add({ months: i });
+          year = date.year;
+          month = date.month - 1; // 0-based for flatpickr/value
+      } else {
+          const d = new Date(self.currentYear, self.currentMonth, 1);
+          d.setMonth(self.currentMonth + i);
+          year = d.getFullYear();
+          month = d.getMonth();
+      }
 
       if (
         self.config.showMonths > 1 ||
         self.config.monthSelectorType === "static"
       ) {
-        self.monthElements[i].textContent =
-          monthToStr(
-            d.getMonth(),
-            self.config.shorthandCurrentMonth,
-            self.l10n
-          ) + " ";
+         if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+             const date = globalThis.Temporal.PlainDate.from({
+                 year: year,
+                 month: month + 1,
+                 day: 1,
+                 calendar: self.config.calendar
+             });
+             const monthName = date.toLocaleString(self.config.locale as string, { month: self.config.shorthandCurrentMonth ? "short" : "long", calendar: self.config.calendar });
+             self.monthElements[i].textContent = monthName + " ";
+         } else {
+             self.monthElements[i].textContent =
+            monthToStr(
+                month,
+                self.config.shorthandCurrentMonth,
+                self.l10n
+            ) + " ";
+         }
       } else {
-        self.monthsDropdownContainer.value = d.getMonth().toString();
+        self.monthsDropdownContainer.value = month.toString();
       }
 
-      yearElement.value = d.getFullYear().toString();
+      yearElement.value = year.toString();
     });
 
-    self._hidePrevMonthArrow =
-      self.config.minDate !== undefined &&
-      (self.currentYear === self.config.minDate.getFullYear()
-        ? self.currentMonth <= self.config.minDate.getMonth()
-        : self.currentYear < self.config.minDate.getFullYear());
+    if (self.config.calendar !== "iso8601" && globalThis.Temporal) {
+         const minDateTemporal = self.config.minDate ? toTemporalInstant(self.config.minDate, self.config.calendar) : null;
+         const maxDateTemporal = self.config.maxDate ? toTemporalInstant(self.config.maxDate, self.config.calendar) : null;
 
-    self._hideNextMonthArrow =
-      self.config.maxDate !== undefined &&
-      (self.currentYear === self.config.maxDate.getFullYear()
-        ? self.currentMonth + 1 > self.config.maxDate.getMonth()
-        : self.currentYear > self.config.maxDate.getFullYear());
+         if (minDateTemporal) {
+            self._hidePrevMonthArrow =
+                (self.currentYear === minDateTemporal.year ? self.currentMonth <= (minDateTemporal.month - 1) : self.currentYear < minDateTemporal.year);
+         }
+
+         if (maxDateTemporal) {
+             self._hideNextMonthArrow =
+                (self.currentYear === maxDateTemporal.year ? self.currentMonth + 1 > (maxDateTemporal.month - 1) : self.currentYear > maxDateTemporal.year);
+         }
+    } else {
+        self._hidePrevMonthArrow =
+        self.config.minDate !== undefined &&
+        (self.currentYear === self.config.minDate.getFullYear()
+            ? self.currentMonth <= self.config.minDate.getMonth()
+            : self.currentYear < self.config.minDate.getFullYear());
+
+        self._hideNextMonthArrow =
+        self.config.maxDate !== undefined &&
+        (self.currentYear === self.config.maxDate.getFullYear()
+            ? self.currentMonth + 1 > self.config.maxDate.getMonth()
+            : self.currentYear > self.config.maxDate.getFullYear());
+    }
   }
 
   function getDateStr(specificFormat?: string) {

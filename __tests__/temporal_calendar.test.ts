@@ -204,4 +204,88 @@ describe("Temporal Calendar Support", () => {
       // Pagume has 5 days in 2020 (based on Temporal)
       expect(currentMonthDays.length).toBe(5);
   });
+
+  test("Ethiopic View on Open (Issue 1 Regression)", () => {
+    // 2023-09-12 is 2016-01-01 (Meskerem 1) in Ethiopic (Amete Mihret)
+    // temporal-polyfill 0.3.0 'ethiopic' seems to default to Amete Alem era (Year ~7516).
+    const date = new Date("2023-09-12T00:00:00");
+
+    instance = createInstance({
+      calendar: "ethiopic",
+      defaultDate: date,
+      useTemporalFormatting: true
+    });
+
+    // Internal state should reflect Ethiopic date (Era year 7516 per temporal-polyfill)
+    // This confirms we are NOT seeing Gregorian 2023.
+    expect(instance.currentYear).toBe(7516);
+    expect(instance.currentMonth).toBe(0);
+
+    const yearInput = instance.currentYearElement;
+    expect(yearInput.value).toBe("7516");
+  });
+
+  test("Ethiopic 13th Month Label (Issue 2 Regression)", () => {
+    // 2023-09-06 is Pagume 1, 2015 Ethiopic. (Amete Alem 7515)
+    const date = new Date("2023-09-06T00:00:00");
+
+    instance = createInstance({
+      calendar: "ethiopic",
+      defaultDate: date,
+      useTemporalFormatting: true
+    });
+
+    expect(instance.currentYear).toBe(7515);
+    expect(instance.currentMonth).toBe(12); // Pagume
+
+    const monthSelect = instance.monthsDropdownContainer;
+    expect(monthSelect.value).toBe("12");
+    expect(monthSelect.options[monthSelect.selectedIndex].textContent).toContain("Pagume");
+  });
+
+  test("Explicit Test for buildMonthDays Logic (User Request)", () => {
+     // 1. Gregorian (Standard)
+     const instanceGreg = createInstance({
+         calendar: "iso8601",
+         defaultDate: "2023-10-01"
+     });
+     // Oct 1 2023 is Sunday.
+     let days = instanceGreg.daysContainer!.querySelectorAll(".flatpickr-day:not(.prevMonthDay):not(.nextMonthDay)");
+     expect(days[0].textContent).toBe("1");
+     instanceGreg.destroy();
+
+     // 2. Ethiopic
+     // 2016-01-01 Ethiopic is 2023-09-12 Gregorian (Tuesday)
+     const instanceEth = createInstance({
+         calendar: "ethiopic",
+         defaultDate: new Date("2023-09-12"), // Meskerem 1
+         useTemporalFormatting: true
+     });
+
+     // Meskerem 1 is Tuesday.
+     const prevDays = instanceEth.daysContainer!.querySelectorAll(".prevMonthDay");
+     expect(prevDays.length).toBe(2);
+
+     days = instanceEth.daysContainer!.querySelectorAll(".flatpickr-day:not(.prevMonthDay):not(.nextMonthDay)");
+     expect(days[0].textContent).toBe("1");
+     expect(days.length).toBe(30);
+     instanceEth.destroy();
+
+     // 3. Hebrew
+     // Rosh Hashanah 5784 is 2023-09-16 (Saturday)
+     const instanceHeb = createInstance({
+         calendar: "hebrew",
+         defaultDate: new Date("2023-09-16"),
+         useTemporalFormatting: true
+     });
+
+     // Tishrei 1 is Saturday.
+     const prevDaysHeb = instanceHeb.daysContainer!.querySelectorAll(".prevMonthDay");
+     expect(prevDaysHeb.length).toBe(6);
+
+     days = instanceHeb.daysContainer!.querySelectorAll(".flatpickr-day:not(.prevMonthDay):not(.nextMonthDay)");
+     expect(days[0].textContent).toBe("1");
+     expect(days.length).toBe(30);
+     instanceHeb.destroy();
+  });
 });
